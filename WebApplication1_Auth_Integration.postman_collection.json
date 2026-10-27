@@ -1,0 +1,485 @@
+{
+  "info": {
+    "name": "WebApplication1 - Postman Auth Integration Suite (2 phases)",
+    "description": "Tests Register, Login, JWT profile access, no-token access, User and Admin role boundaries. PHASE 1: Run folder 01 Bootstrap once (creates two User accounts). SECURE ADMIN SETUP: Public register must NOT permit role Admin; promote only the generated admin candidate through a trusted administrator/DB process after reviewing the row. PHASE 2: Run folder 02 Integration Suite with Keep variable values enabled. Change baseUrl to your actual ASP.NET Core HTTPS port. Requires /api/profile, /api/user, /api/admin, correct JWT role claim. Use only in a development/test database, because registrations insert rows.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "01 Bootstrap Accounts - run FIRST",
+      "description": "Registers new test user and future-admin account. Register always grants User. Pause for authorized promotion of future-admin before running 02.",
+      "item": [
+        {
+          "name": "01 Register normal User - expect 201",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/auth/register",
+            "description": "Creates a new test User. The pre-request script generates fresh userEmail/adminEmail for each bootstrap run.",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"fullName\": \"Postman Test User\",\n  \"email\": \"{{userEmail}}\",\n  \"password\": \"{{userPassword}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Generate a fresh pair of demo accounts for each bootstrap run.",
+                  "// Never use real credentials or real customer data here.",
+                  "const runId = `${Date.now()}${Math.floor(Math.random() * 1000)}`;",
+                  "pm.collectionVariables.set('userEmail', `pt.user.${runId}@example.com`);",
+                  "pm.collectionVariables.set('adminEmail', `pt.admin.${runId}@example.com`);",
+                  "pm.collectionVariables.unset('userToken');",
+                  "pm.collectionVariables.unset('adminToken');",
+                  "console.log('User test email:', pm.collectionVariables.get('userEmail'));",
+                  "console.log('Admin candidate test email:', pm.collectionVariables.get('adminEmail'));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('201 Created - normal user registered', () => {",
+                  "  pm.response.to.have.status(201);",
+                  "});",
+                  "pm.test('No plaintext password in registration response', () => {",
+                  "  const text = pm.response.text().toLowerCase();",
+                  "  pm.expect(text).to.not.include('user#2026test');",
+                  "  pm.expect(text).to.not.include('passwordhash');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "02 Register future Admin as normal User - expect 201",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/auth/register",
+            "description": "Public registration MUST NOT assign Admin. After this response, use an approved admin/database operation to promote only this test account, then run phase 2. See README.",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"fullName\": \"Postman Test Admin\",\n  \"email\": \"{{adminEmail}}\",\n  \"password\": \"{{adminPassword}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('201 Created - future admin account registered', () => {",
+                  "  pm.response.to.have.status(201);",
+                  "});",
+                  "pm.test('Public registration cannot assign Admin role', () => {",
+                  "  const body = pm.response.json();",
+                  "  const role = body.role ?? body.Role;",
+                  "  if (role !== undefined) pm.expect(role).to.eql('User');",
+                  "});",
+                  "const email = pm.collectionVariables.get('adminEmail');",
+                  "console.log('ADMIN TEST ACCOUNT:', email);",
+                  "console.log('SECURE ONE-TIME SETUP (MySQL, only after reviewing the row):');",
+                  "console.log(\"UPDATE `Users` SET `role` = 'Admin' WHERE `Email` = '\" + email + \"' AND `role` = 'User';\");"
+                ]
+              }
+            }
+          ],
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "02 Authentication + Authorization Tests - run SECOND",
+      "description": "Run after role promotion, with Keep variable values enabled so userEmail, adminEmail and JWT tokens are retained.",
+      "item": [
+        {
+          "name": "03 Login success (User) - expect JWT + 200",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/auth/login",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{userEmail}}\",\n  \"password\": \"{{userPassword}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK - valid user credentials', () => {",
+                  "  pm.response.to.have.status(200);",
+                  "});",
+                  "if (pm.response.code === 200) {",
+                  "  const data = pm.response.json();",
+                  "  const token = data.token ?? data.Token;",
+                  "  pm.test('Login returns JWT with three sections', () => {",
+                  "    pm.expect(token).to.be.a('string').and.match(/^[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+$/);",
+                  "  });",
+                  "  pm.test('Token type is Bearer', () => {",
+                  "    pm.expect((data.tokenType ?? data.TokenType)).to.eql('Bearer');",
+                  "  });",
+                  "  if (typeof token === 'string') pm.collectionVariables.set('userToken', token);",
+                  "} else {",
+                  "  pm.collectionVariables.unset('userToken');",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "04 Login failure - wrong password -> 401",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/auth/login",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{userEmail}}\",\n  \"password\": \"this-is-deliberately-wrong-98765\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('401 Unauthorized - invalid password rejected', () => {",
+                  "  pm.response.to.have.status(401);",
+                  "});",
+                  "pm.test('Invalid login does not issue a JWT', () => {",
+                  "  pm.expect(pm.response.text()).not.to.match(/\"token\"\\s*:/i);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "05 Protected profile with JWT -> 200",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/profile",
+            "description": "Requires a GET /api/profile protected with [Authorize].",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{userToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK - /api/profile accepts valid Bearer JWT', () => {",
+                  "  pm.response.to.have.status(200);",
+                  "});",
+                  "if (pm.response.code === 200) {",
+                  "  pm.test('Profile does not disclose a password or password hash', () => {",
+                  "    const obj = pm.response.json();",
+                  "    pm.expect(obj).not.to.have.property('password');",
+                  "    pm.expect(obj).not.to.have.property('Password');",
+                  "    pm.expect(obj).not.to.have.property('passwordHash');",
+                  "    pm.expect(obj).not.to.have.property('PasswordHash');",
+                  "  });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "06 Profile without token -> 401",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/profile",
+            "description": "Explicitly no Authorization header.",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('401 Unauthorized - no Bearer token', () => {",
+                  "  pm.response.to.have.status(401);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "07 User accesses /api/user -> 200",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/user",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{userToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK - User role permitted on /api/user', () => {",
+                  "  pm.response.to.have.status(200);",
+                  "});",
+                  "if (pm.response.code === 200) {",
+                  "  const body = pm.response.json();",
+                  "  pm.test('Response belongs to the logged-in test user', () => {",
+                  "    const email = body.email ?? body.Email;",
+                  "    if (email !== undefined) pm.expect(email).to.eql(pm.collectionVariables.get('userEmail'));",
+                  "    else pm.expect(body).to.be.an('object');",
+                  "  });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "08 User blocked from /api/admin -> 403",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/admin",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{userToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('403 Forbidden - User role cannot access /api/admin', () => {",
+                  "  pm.response.to.have.status(403);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "09 Login Admin -> 200 + JWT",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/auth/login",
+            "description": "Requires the future admin to be promoted through an authorized channel after phase 1.",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{adminEmail}}\",\n  \"password\": \"{{adminPassword}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK - privileged test account logs in', () => {",
+                  "  pm.response.to.have.status(200);",
+                  "});",
+                  "if (pm.response.code === 200) {",
+                  "  const body = pm.response.json();",
+                  "  const token = body.token ?? body.Token;",
+                  "  pm.test('Admin login returns a JWT', () => {",
+                  "    pm.expect(token).to.be.a('string').and.match(/^[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+$/);",
+                  "  });",
+                  "  if (typeof token === 'string') pm.collectionVariables.set('adminToken', token);",
+                  "} else {",
+                  "  pm.collectionVariables.unset('adminToken');",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "10 Admin accesses /api/admin -> 200",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/admin",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK - Admin role permitted on /api/admin', () => {",
+                  "  pm.response.to.have.status(200);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "response": []
+        }
+      ]
+    }
+  ],
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "https://localhost:7001",
+      "type": "string"
+    },
+    {
+      "key": "userEmail",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "adminEmail",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "userPassword",
+      "value": "User#2026Test!",
+      "type": "string"
+    },
+    {
+      "key": "adminPassword",
+      "value": "Admin#2026Test!",
+      "type": "string"
+    },
+    {
+      "key": "userToken",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "adminToken",
+      "value": "",
+      "type": "string"
+    }
+  ]
+}
